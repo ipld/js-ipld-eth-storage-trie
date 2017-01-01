@@ -4,7 +4,6 @@
 const expect = require('chai').expect
 const async = require('async')
 const IpfsBlock = require('ipfs-block')
-const Account = require('ethereumjs-account')
 const Trie = require('merkle-patricia-tree')
 const TrieNode = require('merkle-patricia-tree/trieNode')
 const isExternalLink = require('ipld-eth-trie/src/common').isExternalLink
@@ -12,29 +11,6 @@ const ipldEthStateTrie = require('../src')
 const resolver = ipldEthStateTrie.resolver
 
 describe('IPLD format resolver (local)', () => {
-  // setup contract test data
-  let testContract
-  let testContractData = {
-    balance: new Buffer('012345', 'hex'),
-    codeHash: new Buffer('abcd04a817c80004a817c80004a817c80004a817c80004a817c80004a817c800', 'hex'),
-    stateRoot: new Buffer('012304a817c80004a817c80004a817c80004a817c80004a817c80004a817c800', 'hex')
-  }
-  function prepareTestContract (done) {
-    testContract = new Account(testContractData)
-    done()
-  }
-
-  // setup external account test data
-  let testExternalAccount
-  let testExternalAccountData = {
-    balance: new Buffer('abcdef', 'hex'),
-    nonce: new Buffer('02', 'hex')
-  }
-  function prepareTestExternalAccount (done) {
-    testExternalAccount = new Account(testExternalAccountData)
-    done()
-  }
-
   // setup test trie
   let trie
   let trieNodes = []
@@ -42,8 +18,6 @@ describe('IPLD format resolver (local)', () => {
   before((done) => {
     trie = new Trie()
     async.waterfall([
-      (cb) => prepareTestContract(cb),
-      (cb) => prepareTestExternalAccount(cb),
       (cb) => populateTrie(trie, cb),
       (cb) => dumpTrieNonInlineNodes(trie, trieNodes, cb),
       (cb) => async.map(trieNodes, ipldEthStateTrie.util.serialize, cb)
@@ -56,56 +30,79 @@ describe('IPLD format resolver (local)', () => {
 
   function populateTrie (trie, cb) {
     async.series([
-      (cb) => trie.put(new Buffer('000a0a00', 'hex'), testExternalAccount.serialize(), cb),
-      (cb) => trie.put(new Buffer('000a0a01', 'hex'), testExternalAccount.serialize(), cb),
-      (cb) => trie.put(new Buffer('000a0a02', 'hex'), testExternalAccount.serialize(), cb),
-      (cb) => trie.put(new Buffer('000a0b00', 'hex'), testExternalAccount.serialize(), cb),
-      (cb) => trie.put(new Buffer('000b0a00', 'hex'), testContract.serialize(), cb),
-      (cb) => trie.put(new Buffer('000b0b00', 'hex'), testContract.serialize(), cb),
-      (cb) => trie.put(new Buffer('000c0a00', 'hex'), testContract.serialize(), cb)
+      (cb) => trie.put(new Buffer('000a0a00', 'hex'), new Buffer('cafe01', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000a0a01', 'hex'), new Buffer('cafe02', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000a0a02', 'hex'), new Buffer('cafe03', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000a0b00', 'hex'), new Buffer('cafe04', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000b0a00', 'hex'), new Buffer('cafe05', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000b0b00', 'hex'), new Buffer('cafe06', 'hex'), cb),
+      (cb) => trie.put(new Buffer('000c0a00', 'hex'), new Buffer('cafe07', 'hex'), cb)
     ], (err) => {
       if (err) return cb(err)
       cb()
     })
   }
 
-  it('multicodec is eth-state-trie', () => {
-    expect(resolver.multicodec).to.equal('eth-state-trie')
+  // function logTrie(cb){
+  //   async.each(dagNodes, (node, next) => {
+  //     let index = dagNodes.indexOf(node)
+  //     let trieNode = trieNodes[index]
+  //     resolver.tree(node, (err, paths) => {
+  //       if (err) return next(err)
+  //       let cidForHash = require('ipld-eth-trie/src/common').cidForHash
+  //       let cid = cidForHash('eth-storage-trie', trieNode.hash())
+  //       console.log(index, paths.map(path => path.path), cid.toBaseEncodedString())
+  //       next()
+  //     })
+  //   }, cb)
+  // }
+
+  it('multicodec is eth-storage-trie', () => {
+    expect(resolver.multicodec).to.equal('eth-storage-trie')
   })
 
   describe('resolver.resolve', () => {
-    it('root node resolves to branch', (done) => {
+    it('root node resolves to neck', (done) => {
       let rootNode = dagNodes[0]
-      resolver.resolve(rootNode, '0/0/0/c/0/a/0/0/codeHash', (err, result) => {
+      resolver.resolve(rootNode, '0/0/0/c/0/a/0/0/', (err, result) => {
         expect(err).to.not.exist
         let trieNode = result.value
-        expect(result.remainderPath).to.eql('c/0/a/0/0/codeHash')
+        expect(result.remainderPath).to.eql('c/0/a/0/0/')
         expect(isExternalLink(trieNode)).to.eql(true)
         done()
       })
     })
 
-    it('"c" branch node resolves down to account data', (done) => {
-      let cBranchNode = dagNodes[4]
-      resolver.resolve(cBranchNode, 'c/0/a/0/0/codeHash', (err, result) => {
+    it('neck node resolves "c" down to buffer', (done) => {
+      let node = dagNodes[1]
+      resolver.resolve(node, 'c/0/a/0/0/', (err, result) => {
         expect(err).to.not.exist
         let trieNode = result.value
         expect(result.remainderPath).to.eql('')
         expect(isExternalLink(trieNode)).to.eql(false)
         expect(Buffer.isBuffer(result.value)).to.eql(true)
-        expect(result.value.toString('hex')).to.eql(testContract.codeHash.toString('hex'))
         done()
       })
     })
-  })
 
-  describe('resolver.tree', () => {
-    it('"c" branch node lists account paths', (done) => {
-      let cBranchNode = dagNodes[4]
-      resolver.tree(cBranchNode, (err, result) => {
+    it('neck node resolves "b" down to branch', (done) => {
+      let node = dagNodes[1]
+      resolver.resolve(node, 'b/0/a/0/0/', (err, result) => {
         expect(err).to.not.exist
-        let childPaths = result.map(item => item.path)
-        expect(childPaths.includes('balance')).to.eql(true)
+        let trieNode = result.value
+        expect(result.remainderPath).to.eql('0/a/0/0/')
+        expect(isExternalLink(trieNode)).to.eql(true)
+        done()
+      })
+    })
+
+    it('neck node resolves "a" down to branch', (done) => {
+      let node = dagNodes[1]
+      resolver.resolve(node, 'a/0/a/0/0/', (err, result) => {
+        expect(err).to.not.exist
+        let trieNode = result.value
+        expect(result.remainderPath).to.eql('0/a/0/0/')
+        expect(isExternalLink(trieNode)).to.eql(true)
         done()
       })
     })
