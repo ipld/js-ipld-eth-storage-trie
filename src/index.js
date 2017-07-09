@@ -15,7 +15,8 @@ exports.util = {
 exports.resolver = {
   multicodec: trieIpldFormat,
   tree: tree,
-  resolve: resolve
+  resolve: resolve,
+  isLink: isLink
 }
 
 function resolve (block, path, callback) {
@@ -37,5 +38,23 @@ function tree (block, options, callback) {
       if (err) return callback(err)
       callback(null, result)
     })
+  })
+}
+
+function isLink (block, path, callback) {
+  resolve(block, path, (err, result) => {
+    if (err) {
+      return callback(err)
+    }
+
+    if (result.remainderPath.length > 0) {
+      return callback(new Error('path out of scope'))
+    }
+
+    if (typeof result.value === 'object' && result.value['/']) {
+      callback(null, result.value)
+    } else {
+      callback(null, false)
+    }
   })
 }
